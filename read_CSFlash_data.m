@@ -4,35 +4,54 @@ function [kdata,m2] = read_CSFlash_data(pathname)
 % kspace = read_BrukerFID(pathname);
 % kspace = fftshift(kspace,1);
 
+%------TEMPORAL
+clear all;
+close all;
+clc;
+%---------------
+pathname = ['/home/kostya/Documents/BCS_matlab_code/BCS_pros/48'];
 method = readmethod(pathname);
 acq = readacqp(pathname);
 
-nr = acq.NR;
-nsl = acq.nSlice;
-fid=fopen([pathname,'/fid']);
-if(strcmp(acq.wordsize,'_32_BIT')) 
-    ztmp = fread(fid,inf,'int32',0,'l');
-end
-if(strcmp(acq.wordsize,'_16_BIT')) 
-    ztmp = fread(fid,inf,'int16',0,'l');
-end
-fclose(fid);
+%---Number of Repetitions
+NR = acq.NR;
+%---Number of Slices
+NSlices = acq.NSlices;
+%---Number of Phase & RO steps
+PE_steps = acq.size(2);
+RO_steps = method.kSize(1);
 
-ztmp = ztmp(1:2:end) + sqrt(-1)*ztmp(2:2:end);
-% need to debug
-readsize = 2^round(log(acq.size(1)/2)/log(2));
+%------Reading FID word_by_word
+FID=fopen([pathname,'/fid']);
+if(strcmp(acq.wordsize,'_32_BIT'));wSize = 'int32';else wSize = 'int16';end
+RawData = fread(FID,inf,wSize,0,'l');
+fclose(FID);
 
-%z = reshape(z,acq.size(1)/2,nsl,acq.size(2),nr);
-ztmp = reshape(ztmp,readsize,nsl,acq.size(2),nr);
-z = ztmp(1:acq.size(1)/2,:,:,:);
-z = permute(z,[1 3 4 2]);
+%-------Creating complex data from words-----
+RawDataComplex = RawData(1:2:end) + sqrt(-1)*RawData(2:2:end);
+[TotalPoints, ~] = size(RawDataComplex); 
+
+%--Computing an ADC sampling size (num of points/words sampled at ones)
+%--should be equal or bigger then RO and be
+%--an integer value within ADC sampling range.
+ADC = (0:1:31);
+bit = 1;
+while RO_steps > power(2, ADC(bit)); bit=bit+1; end
+
+ADC_SampPoints = power(2, ADC(bit));
+
+%if TotalPoints == ADC_SampPoints*NSlices*PE_steps*NR
+    
+ADCMatrix = reshape(RawDataComplex,ADC_SampPoints,NSlices,PE_steps,NR);
+RawMatrix = ADCMatrix(1:RO_steps,:,:,:);
+RawMatrixPerm = permute(RawMatrix,[1 3 4 2]);
 
 [m2, tab] = mask_cs2d(pathname);
 
-kdata = zeros(size(z));
-for i=1:nsl
+kdata = zeros(size(RawMatrixPerm));
+for i=1:acq.NSlices
     for j=1:acq.NR
-        kdata(:,tab(:,j,i),j,i) = z(:,:,j,i);
+        kdata(:,tab(:,j,i),j,i) = RawMatrixPerm(:,:,j,i);
     end
 end
 
